@@ -24,8 +24,8 @@ INCOMING = 1
 OUTGOING = 2
 
 # Protocols magic numbers
-FLAP_ID = 42
-MRIM_ID = 3735928559
+FLAP_ID = 0x2A
+MRIM_ID = 0xDEADBEEF
 
 # MySQL
 db_host = "localhost"
@@ -34,8 +34,8 @@ db_user = "root"
 db_pass = ""
 
 def proto(data):
-    if struct.unpack("!B", data[:1])[0] == FLAP_ID: return OSCAR
-    elif struct.unpack("!I", data[:4])[0] == MRIM_ID: return MRIM
+    if struct.unpack("<B", data[:1])[0] == FLAP_ID: return OSCAR
+    elif struct.unpack("<I", data[:4])[0] == MRIM_ID: return MRIM
     return UNKNOW
 
 def oscar(data):
@@ -67,7 +67,7 @@ def oscar(data):
 	    data = data[30:tlvlen]
 	    # find tlv type 0x2711
 	    tlvlen = 0
-	    while tlvtype != 10001:
+	    while tlvtype != 0x2711:
 		data = data[tlvlen:]
 		tlvtype, tlvlen = struct.unpack("!HH", data[:4])
 		print "          TLV type: %d, len: %d" % (tlvtype, tlvlen)
@@ -91,6 +91,26 @@ def oscar(data):
 		else: return OUTGOING, uin, msg
     return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
 
+def mrim(data):
+    magic, proto_ver, seq, cmd, datalen, ip_from, fromport = struct.unpack("<IIIIIII", data[:28]) # parse mrim struct
+    if magic == MRIM_ID:
+	print "MRIM ver: %d, MSG: %d, len: %d, ip: %d, port: %d" % (proto_ver, cmd, datalen, ip_from, fromport)
+	if (cmd == 0x1008 or cmd == 0x1009):
+	    data = data[44:]
+	    if cmd == 0x1009: data = data[4:] # msg_id
+	    data = data[4:] # flags
+	    handlelen = struct.unpack("<I", data[:4])[0] # len handle
+	    handle = str(data[4:4+handlelen]) # get handle
+	    print "  Handle: %s, len: %d" % (handle, datalen)
+	    data = data[4+handlelen:]
+	    datalen = struct.unpack("<I", data[:4])[0] # len message
+	    msg = data[4:4+datalen]
+	    if (datalen == 2 and msg[0] == ' '): return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
+	    print "  Message: %s" % msg
+	    if cmd == 0x1009: return INCOMING, handle, msg
+	    else: return OUTGOING, handle, msg
+    return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
+
 def callback(payload):
     data = payload.get_data()
     pkt = ip.IP(data)
@@ -100,6 +120,7 @@ def callback(payload):
     route = UNKNOW
     temp = proto(buf)
     if temp == OSCAR: route, handle, msg = oscar(buf)
+    elif temp == MRIM: route, handle, msg = mrim(buf)
     if route == INCOMING:
 	print "Message from %s: %s" % (handle, msg)
 	print """INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg)

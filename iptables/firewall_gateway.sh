@@ -34,3 +34,4 @@ $IPT -t nat -A POSTROUTING -o $IF_WAN -s $NET_LAN -j MASQUERADE
 
 $IPT -A FORWARD -p tcp --dport 5190 -j imsniff
 $IPT -A FORWARD -p tcp --sport 5190 -j imsniff
+$IPT -A FORWARD -m string --algo bm --from 51 --hex-string '|EF BE AD DE|' -j NFQUEUE
