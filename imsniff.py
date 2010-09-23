@@ -4,11 +4,6 @@
 # Copyright (C) 2010 Denis Klester. All rights reserved.
 #
 
-__author__ = "Denis Klester"
-__copyright__ = "Copyright (C) 2010 Denis Klester"
-__revision__ = "$Id$"
-__version__ = "0.1"
-
 import sys, os, nfqueue, socket, struct, MySQLdb
 from socket import AF_INET, AF_INET6, inet_ntoa
 from dpkt import ip, tcp
@@ -105,7 +100,11 @@ def mrim(data):
 	    data = data[4+handlelen:]
 	    datalen = struct.unpack("<I", data[:4])[0] # len message
 	    msg = data[4:4+datalen]
-	    if (datalen == 2 and msg[0] == ' '): return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
+	    uniarr = struct.unpack("<%dH" % (datalen/2), msg[:datalen])
+	    msg = ""
+	    for i in range(len(uniarr)):
+		msg += unichr(uniarr[i]).encode('utf-8')
+	    if (datalen == 2 and msg == ' '): return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
 	    print "  Message: %s" % msg
 	    if cmd == 0x1009: return INCOMING, handle, msg
 	    else: return OUTGOING, handle, msg
