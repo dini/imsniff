@@ -34,10 +34,10 @@ def proto(data):
     return UNKNOW
 
 def oscar(data):
-    flap_id, flap_ch, flap_seq, flap_size = struct.unpack("!BBHH", data[:6]) # parse flap struct
+    flap_id, flap_ch, flap_seq, flap_size = struct.unpack("!2B2H", data[:6]) # parse flap struct
     if (flap_id == FLAP_ID and flap_ch == 2):
 	print "FLAP ID: %d, channel: %d, seq: %d, size: %d" % (flap_id, flap_ch, flap_seq, flap_size)
-	snac_id, snac_type, snac_flags, snac_seq = struct.unpack("!HHHL", data[6:16]) # parse snac struct
+	snac_id, snac_type, snac_flags, snac_seq = struct.unpack("!3HL", data[6:16]) # parse snac struct
 	if (snac_id == 4 and (snac_type == 6 or snac_type == 7)):
 	    print "  SNAC ID: %d, type: %d, flags: %d, seq: %d" % (snac_id, snac_type, snac_flags, snac_seq)
 	    msg_id, msg_ch, uinlen = struct.unpack("!QHB", data[16:27]) # parse snac data
@@ -45,49 +45,77 @@ def oscar(data):
 	    print "    Message ID: %d, channel: %d, UIN: %d, len: %d" % (msg_id, msg_ch, int(uin), uinlen)
 	    data = data[27+uinlen:flap_size]
 	    if snac_type == 7:
-		warn_lvl, tlvs = struct.unpack("!HH", data[:4])
+		warn_lvl, tlvs = struct.unpack("!2H", data[:4])
 		data = data[4:]
-	    # find tlv type 5
 	    tlvlen = 0
 	    tlvtype = 0
-	    while tlvtype != 5:
-		data = data[tlvlen:]
-		tlvtype, tlvlen = struct.unpack("!HH", data[:4])
-		print "      TLV type: %d, len: %d" % (tlvtype, tlvlen)
-		if (tlvtype == 5 and tlvlen < 5): tlvtype = 0
-		tlvlen += 4
-	    msg_type, msg_cookie = struct.unpack("!HQ", data[4:14])
-	    guid = struct.unpack("!IHHBBBBBBBB", data[14:30])
-	    print "        Msg type: %d, cooking: %d" % (msg_type, msg_cookie), ", GUID: ", list(guid)
-	    data = data[30:tlvlen]
-	    # find tlv type 0x2711
-	    tlvlen = 0
-	    while tlvtype != 0x2711:
-		data = data[tlvlen:]
-		tlvtype, tlvlen = struct.unpack("!HH", data[:4])
-		print "          TLV type: %d, len: %d" % (tlvtype, tlvlen)
-		tlvlen += 4
-	    data = data[4:tlvlen]
-	    # parse capability struct
-	    datalen, protov = struct.unpack("<HH", data[:4])
-	    plug_guid = struct.unpack("!IHHBBBBBBBB", data[4:20])
-	    unknow, client_flags, unknow, downcount = struct.unpack("<HIBH", data[20:29])
-	    data = data[datalen+2:]
-	    # unknow struct
-	    datalen, downcount = struct.unpack("<HH", data[:4])
-	    data = data[datalen+2:]
-	    # parse message struct
-	    msgtype, msgflag, status, priority, msglen = struct.unpack("<BBHHH", data[:8])
-	    print "            Message type: %d, flag: %d, status: %d, priority: %d, len: %d" % (msgtype, msgflag, status, priority, msglen)
+	    if msg_ch == 1:
+		# find tlv 0x0002
+		while tlvtype != 0x0002:
+		    data = data[tlvlen:]
+		    tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+		    print "      TLV type: %d, len: %d" % (tlvtype, tlvlen)
+		    if (tlvtype == 0x0002 and tlvlen < 5): tlvtype = 0
+		    tlvlen += 4
+		tlvlen = 0
+		# find tlv 0x0101
+		while tlvtype != 0x0101:
+		    data = data[tlvlen:]
+		    tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+		    print "        Fragment type: %d, len: %d" % (tlvtype, tlvlen)
+		    if (tlvtype == 0x0101 and tlvlen < 5): tlvtype = 0
+		    tlvlen += 4
+		data = data[4:tlvlen]
+		charset_num, charset_sub = struct.unpack("!2H", data[:4])
+		print "          Charset num: %d, subset: %d" % (charset_num, charset_sub)
+		msg = data[4:]
+		if msg[:2] == 0xfffe: msg = msg[2:]
+		msgtype = 1
+	    elif (msg_ch == 2) or (msg_ch == 4):
+		# find tlv 0x0005
+		while tlvtype != 0x0005:
+		    data = data[tlvlen:]
+		    tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+		    print "      TLV type: %d, len: %d" % (tlvtype, tlvlen)
+		    if (tlvtype == 0x0005 and tlvlen < 5): tlvtype = 0
+		    tlvlen +=4
+		if msg_ch == 2:
+		    msg_type, msg_cookie = struct.unpack("!HQ", data[4:14])
+		    guid = struct.unpack("!I2H8B", data[14:30])
+		    print "        Msg type: %d, cooking: %d" % (msg_type, msg_cookie), ", GUID: ", list(guid)
+		    data = data[30:tlvlen]
+		    # find tlv type 0x2711
+		    tlvlen = 0
+		    while tlvtype != 0x2711:
+			data = data[tlvlen:]
+			tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+			print "          TLV type: %d, len: %d" % (tlvtype, tlvlen)
+			tlvlen += 4
+		    data = data[4:tlvlen]
+		    # parse capability struct
+		    datalen, protov = struct.unpack("<2H", data[:4])
+		    plug_guid = struct.unpack("!I2H8B", data[4:20])
+		    unknow, client_flags, unknow, downcount = struct.unpack("<HIBH", data[20:29])
+		    data = data[datalen+2:]
+		    # unknow struct
+		    datalen, downcount = struct.unpack("<2H", data[:4])
+		    data = data[datalen+2:]
+		    # parse message struct
+		    msgtype, msgflag, status, priority, msglen = struct.unpack("<2B3H", data[:8])
+		    print "            Message type: %d, flag: %d, status: %d, priority: %d, len: %d" % (msgtype, msgflag, status, priority, msglen)
+		    msg = data[8:8+msglen]
+		else:
+		    uintemp, msgtype, msgflag, msglen = struct.unpack("<I2BH", data[4:12])
+		    print "            Message type: %d, flag: %d, len: %d, uin: %d" % (msgtype, msgflag, msglen, uintemp)
+		    msg = data[12:12+msglen]
 	    if msgtype == 1:
-		msg = data[8:8+msglen]
 		print "              Message: ", msg
-		if snac_type == 7: return INCOMING, uin, msg
+                if snac_type == 7: return INCOMING, uin, msg
 		else: return OUTGOING, uin, msg
     return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
 
 def mrim(data):
-    magic, proto_ver, seq, cmd, datalen, ip_from, fromport = struct.unpack("<IIIIIII", data[:28]) # parse mrim struct
+    magic, proto_ver, seq, cmd, datalen, ip_from, fromport = struct.unpack("<7I", data[:28]) # parse mrim struct
     if magic == MRIM_ID:
 	print "MRIM ver: %d, MSG: %d, len: %d, ip: %d, port: %d" % (proto_ver, cmd, datalen, ip_from, fromport)
 	if (cmd == 0x1008 or cmd == 0x1009):
@@ -100,10 +128,12 @@ def mrim(data):
 	    data = data[4+handlelen:]
 	    datalen = struct.unpack("<I", data[:4])[0] # len message
 	    msg = data[4:4+datalen]
-	    uniarr = struct.unpack("<%dH" % (datalen/2), msg[:datalen])
-	    msg = ""
-	    for i in range(len(uniarr)):
-		msg += unichr(uniarr[i]).encode('utf-8')
+	    if (msg[1] == '\x04' or msg[1] == '\x00'):
+		uniarr = struct.unpack("<%dH" % (datalen/2), msg[:datalen])
+		msg = ""
+		for i in range(len(uniarr)):
+		    msg += unichr(uniarr[i]).encode('utf-8')
+	    else: msg = msg.decode('cp1251')
 	    if (datalen == 2 and msg == ' '): return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
 	    print "  Message: %s" % msg
 	    if cmd == 0x1009: return INCOMING, handle, msg
@@ -147,6 +177,6 @@ def bind():
 	dbh.close()
         sys.exit(1)
 
-db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name)
+db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name, use_unicode=True, charset="utf8")
 dbh = db.cursor()
 bind()
