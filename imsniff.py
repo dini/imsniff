@@ -57,7 +57,7 @@ def oscar(data):
 		    print "      TLV type: %d, len: %d" % (tlvtype, tlvlen)
 		    if (tlvtype == 0x0002 and tlvlen < 5): tlvtype = 0
 		    tlvlen += 4
-		tlvlen = 0
+		tlvlen = 4
 		# find tlv 0x0101
 		while tlvtype != 0x0101:
 		    data = data[tlvlen:]
@@ -69,7 +69,6 @@ def oscar(data):
 		charset_num, charset_sub = struct.unpack("!2H", data[:4])
 		print "          Charset num: %d, subset: %d" % (charset_num, charset_sub)
 		msg = data[4:]
-		if msg[:2] == 0xfffe: msg = msg[2:]
 		msgtype = 1
 	    elif (msg_ch == 2) or (msg_ch == 4):
 		# find tlv 0x0005
@@ -109,6 +108,12 @@ def oscar(data):
 		    print "            Message type: %d, flag: %d, len: %d, uin: %d" % (msgtype, msgflag, msglen, uintemp)
 		    msg = data[12:12+msglen]
 	    if msgtype == 1:
+		if (msg[0] == '\xfe' and msg[1] == '\xff'): msg = msg[2:]
+		if (msg[0] == '\x04' or msg[0] == '\x00'):
+		    unistr = struct.unpack("!%dH" % (len(msg)/2), msg)
+		    msg = ""
+		    for i in range(len(unistr)):
+			msg += unichr(unistr[i]).encode('utf-8')
 		print "              Message: ", msg
                 if snac_type == 7: return INCOMING, uin, msg
 		else: return OUTGOING, uin, msg
@@ -128,13 +133,14 @@ def mrim(data):
 	    data = data[4+handlelen:]
 	    datalen = struct.unpack("<I", data[:4])[0] # len message
 	    msg = data[4:4+datalen]
+	    # encode to utf8
 	    if (msg[1] == '\x04' or msg[1] == '\x00'):
-		uniarr = struct.unpack("<%dH" % (datalen/2), msg[:datalen])
+		unistr = struct.unpack("<%dH" % (datalen/2), msg[:datalen])
 		msg = ""
-		for i in range(len(uniarr)):
-		    msg += unichr(uniarr[i]).encode('utf-8')
+		for i in range(len(unistr)):
+		    msg += unichr(unistr[i]).encode('utf-8')
 	    else: msg = msg.decode('cp1251')
-	    if (datalen == 2 and msg == ' '): return UNKNOW, UNKNOW_TXT, UNKNOW_TXT
+	    if (datalen == 2 and msg == ' '): return UNKNOW, UNKNOW_TXT, UNKNOW_TXT # null message
 	    print "  Message: %s" % msg
 	    if cmd == 0x1009: return INCOMING, handle, msg
 	    else: return OUTGOING, handle, msg
