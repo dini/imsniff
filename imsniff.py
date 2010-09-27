@@ -28,6 +28,13 @@ db_name = "security"
 db_user = "root"
 db_pass = ""
 
+def parse(data):
+    msg = ""
+    for i in range(len(data)):
+	if (data[i] == chr(0x22) or data[i] == chr(0x27)): msg += "\'"
+	else: msg += data[i]
+    return msg
+
 def proto(data):
     if struct.unpack("<B", data[:1])[0] == FLAP_ID: return OSCAR
     elif struct.unpack("<I", data[:4])[0] == MRIM_ID: return MRIM
@@ -156,6 +163,7 @@ def callback(payload):
     temp = proto(buf)
     if temp == OSCAR: route, handle, msg = oscar(buf)
     elif temp == MRIM: route, handle, msg = mrim(buf)
+    msg = parse(msg)
     if route == INCOMING:
 	print "Message from %s: %s" % (handle, msg)
 	print """INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg)
