@@ -4,9 +4,8 @@
 # Copyright (C) 2010 Denis Klester. All rights reserved.
 #
 
-import sys, os, nfqueue, socket, struct, re, MySQLdb
+import sys, os, nfqueue, dpkt, socket, struct, re, MySQLdb
 from socket import AF_INET, AF_INET6, inet_ntoa
-from dpkt import ip, tcp
 
 # Protocol family id
 OSCAR = 1
@@ -155,26 +154,28 @@ def mrim(data):
 
 def callback(payload):
     data = payload.get_data()
-    pkt = ip.IP(data)
-    ip_src = inet_ntoa(pkt.src)
-    ip_dst = inet_ntoa(pkt.dst)
-    buf = pkt.tcp.data
-    route = UNKNOW
-    temp = proto(buf)
-    if temp == OSCAR: route, handle, msg = oscar(buf)
-    elif temp == MRIM: route, handle, msg = mrim(buf)
-    if route != UNKNOW: msg = parse(msg)
-    db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name, use_unicode=True, charset="utf8")
-    dbh = db.cursor()
-    if route == INCOMING:
-	print "Message from %s: %s" % (handle, msg)
-	print """INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg)
-	dbh.execute("""INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg))
-    elif route == OUTGOING:
-	print "Message to %s: %s" % (handle, msg)
-	print """INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg)
-	dbh.execute("""INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg))
-    dbh.close()
+    pkt = dpkt.ip.IP(data)
+    if pkt.p == dpkt.ip.IP_PROTO_TCP: buf = pkt.tcp.data
+    elif pkt.p == dpkt.ip.IP_PROTO_UDP: buf = pkt.udp.data
+    if buf:
+	route = UNKNOW
+	temp = proto(buf)
+	if temp == OSCAR: route, handle, msg = oscar(buf)
+	elif temp == MRIM: route, handle, msg = mrim(buf)
+	if route != UNKNOW: msg = parse(msg)
+	db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name, use_unicode=True, charset="utf8")
+	dbh = db.cursor()
+	if route == INCOMING:
+	    ip_dst = inet_ntoa(pkt.dst)
+	    print "Message from %s: %s" % (handle, msg)
+	    print """INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg)
+	    dbh.execute("""INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg))
+	elif route == OUTGOING:
+	    ip_src = inet_ntoa(pkt.src)
+	    print "Message to %s: %s" % (handle, msg)
+	    print """INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg)
+	    dbh.execute("""INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg))
+	dbh.close()
     payload.set_verdict(nfqueue.NF_ACCEPT)
 
 def bind():
@@ -189,7 +190,12 @@ def bind():
         print "Exiting..."
         q.unbind(socket.AF_INET)
         q.close()
-	dbh.close()
         sys.exit(1)
 
-bind()
+def main():
+    if os.geteuid() != 0:
+	sys.exit("You must be super-user to run this program")
+    bind()
+
+if __name__ == '__main__':
+    main()
