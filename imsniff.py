@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-# encoding: utf-8
+# -*- coding: UTF-8 -*-
 #
 # Copyright (C) 2010 Denis Klester. All rights reserved.
 #
 
-import sys, os, nfqueue, socket, struct, MySQLdb
+import sys, os, nfqueue, socket, struct, re, MySQLdb
 from socket import AF_INET, AF_INET6, inet_ntoa
 from dpkt import ip, tcp
 
@@ -33,7 +33,7 @@ def parse(data):
     for i in range(len(data)):
 	if (data[i] == chr(0x22) or data[i] == chr(0x27)): msg += "\'"
 	else: msg += data[i]
-    return msg
+    return re.sub('<[^<]*?>', '', msg)
 
 def proto(data):
     if struct.unpack("<B", data[:1])[0] == FLAP_ID: return OSCAR
@@ -163,7 +163,9 @@ def callback(payload):
     temp = proto(buf)
     if temp == OSCAR: route, handle, msg = oscar(buf)
     elif temp == MRIM: route, handle, msg = mrim(buf)
-    msg = parse(msg)
+    if route != UNKNOW: msg = parse(msg)
+    db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name, use_unicode=True, charset="utf8")
+    dbh = db.cursor()
     if route == INCOMING:
 	print "Message from %s: %s" % (handle, msg)
 	print """INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg)
@@ -172,8 +174,7 @@ def callback(payload):
 	print "Message to %s: %s" % (handle, msg)
 	print """INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg)
 	dbh.execute("""INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg))
-
-
+    dbh.close()
     payload.set_verdict(nfqueue.NF_ACCEPT)
 
 def bind():
@@ -191,6 +192,4 @@ def bind():
 	dbh.close()
         sys.exit(1)
 
-db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name, use_unicode=True, charset="utf8")
-dbh = db.cursor()
 bind()
