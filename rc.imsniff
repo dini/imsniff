@@ -1,0 +1,22 @@
+#!/bin/bash
+
+case "$1" in
+    start)
+	echo Starting imSniff...
+	imsniff.py -d
+    ;;
+    stop)
+        if [ -r /var/run/imsniff.pid ]; then
+    	    echo Stopping imSniff...
+            kill -TERM `cat /var/run/imsniff.pid`
+        fi
+    ;;
+    restart)
+        $0 stop
+        sleep 2
+        $0 start
+    ;;
+    *)
+	echo "Usage: $0 [start|stop|restart]"
+    ;;
+esac

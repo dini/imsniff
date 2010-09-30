@@ -35,11 +35,12 @@ db_pass = ""
 class Sniffer(object):
     """ Instant Messenging sniffer """
 
-    def __init__(self, daemon=True, pidfile=PIDFILE, logfile=LOGFILE):
+    def __init__(self, daemon=True, pidfile=PIDFILE, logfile=LOGFILE, debug=True):
 	self.daemon = daemon	# Daemonize?
+	self.debug = debug	# Debug mode
 	self.pidfile = pidfile
 	try:
-	    self.imlog = open(logfile, 'a')
+	    self.imlog = open(logfile, 'w', 0)
 	except (IOError, OSError), (errno, strerror):
 	    print "Error opening log file %s: %s" % (logfile, strerror)
 	    self.imlog = None
@@ -62,20 +63,27 @@ class Sniffer(object):
 	for i in range(len(data)):
 	    if (data[i] == chr(0x22) or data[i] == chr(0x27)): msg += "\'"
 	    else: msg += data[i]
+	if self.debug: print "Message in parse: %s" % msg
 	return re.sub('<[^<]*?>', '', msg)
 
     def proto(self, data):
+#	if self.debug:
+#	    print "Packet data in proto:"
+#	    print list(data)
 	if struct.unpack("<B", data[:1])[0] == FLAP_ID: return OSCAR
 	elif struct.unpack("<I", data[:4])[0] == MRIM_ID: return MRIM
 	else: return UNKNOW
 
     def oscar(self, data):
 	flap_id, flap_ch, flap_seq, flap_size = struct.unpack("!2B2H", data[:6]) # parse flap struct
+	if self.debug: print "FLAP ID: %d, channel: %d, seq: %d, size: %d" % (flap_id, flap_ch, flap_seq, flap_size)
 	if (flap_id == FLAP_ID and flap_ch == 2):
 	    snac_id, snac_type, snac_flags, snac_seq = struct.unpack("!3HL", data[6:16]) # parse snac struct
+	    if self.debug: print "SNAC ID: %d, type: %d, flags: %d, seq: %d" % (snac_id, snac_type, snac_flags, snac_seq)
 	    if (snac_id == 4 and (snac_type == 6 or snac_type == 7)):
 		msg_id, msg_ch, uinlen = struct.unpack("!QHB", data[16:27]) # parse snac data
 		uin = str(data[27:27+uinlen]) # get uin
+		if self.debug: print "Message ID: %d, channel: %d, UIN: %d, len: %d" % (msg_id, msg_ch, int(uin), uinlen)
 		data = data[27+uinlen:flap_size]
 		if snac_type == 7:
 		    warn_lvl, tlvs = struct.unpack("!2H", data[:4])
@@ -87,6 +95,7 @@ class Sniffer(object):
 		    while tlvtype != 0x0002:
 			data = data[tlvlen:]
 			tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+			if self.debug: print "TLV type: %d, len: %d" % (tlvtype, tlvlen)
 			if (tlvtype == 0x0002 and tlvlen < 5): tlvtype = 0
 			tlvlen += 4
 		    tlvlen = 4
@@ -94,10 +103,12 @@ class Sniffer(object):
 		    while tlvtype != 0x0101:
 			data = data[tlvlen:]
 			tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+			if self.debug: print "Fragment type: %d, len: %d" % (tlvtype, tlvlen)
 			if (tlvtype == 0x0101 and tlvlen < 5): tlvtype = 0
 			tlvlen += 4
 		    data = data[4:tlvlen]
 		    charset_num, charset_sub = struct.unpack("!2H", data[:4])
+		    if self.debug: print "Charset num: %d, subset: %d" % (charset_num, charset_sub)
 		    msg = data[4:]
 		    msgtype = 1
 		elif (msg_ch == 2) or (msg_ch == 4):
@@ -105,17 +116,20 @@ class Sniffer(object):
 		    while tlvtype != 0x0005:
 			data = data[tlvlen:]
 			tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+			if self.debug: print "TLV type: %d, len: %d" % (tlvtype, tlvlen)
 			if (tlvtype == 0x0005 and tlvlen < 5): tlvtype = 0
 			tlvlen +=4
 		    if msg_ch == 2:
 			msg_type, msg_cookie = struct.unpack("!HQ", data[4:14])
 			guid = struct.unpack("!I2H8B", data[14:30])
+			if self.debug: print "Msg type: %d, cooking: %d" % (msg_type, msg_cookie), ", GUID: ", list(guid)
 			data = data[30:tlvlen]
 			# find tlv type 0x2711
 			tlvlen = 0
 			while tlvtype != 0x2711:
 			    data = data[tlvlen:]
 			    tlvtype, tlvlen = struct.unpack("!2H", data[:4])
+			    if self.debug: print "TLV type: %d, len: %d" % (tlvtype, tlvlen)
 			    tlvlen += 4
 			data = data[4:tlvlen]
 			# parse capability struct
@@ -128,9 +142,11 @@ class Sniffer(object):
 			data = data[datalen+2:]
 			# parse message struct
 			msgtype, msgflag, status, priority, msglen = struct.unpack("<2B3H", data[:8])
+			if self.debug: print "Message type: %d, flag: %d, status: %d, priority: %d, len: %d" % (msgtype, msgflag, status, priority, msglen)
 			msg = data[8:8+msglen]
 		    else:
 			uintemp, msgtype, msgflag, msglen = struct.unpack("<I2BH", data[4:12])
+			if self.debug: print "Message type: %d, flag: %d, len: %d, uin: %d" % (msgtype, msgflag, msglen, uintemp)
 			msg = data[12:12+msglen]
 		if msgtype == 1:
 		    if (msg[0] == '\xfe' and msg[1] == '\xff'): msg = msg[2:]
@@ -145,6 +161,7 @@ class Sniffer(object):
 
     def mrim(self, data):
 	magic, proto_ver, seq, cmd, datalen, ip_from, fromport = struct.unpack("<7I", data[:28]) # parse mrim struct
+	if self.debug: print "MRIM ver: %d, MSG: %d, len: %d, ip: %d, port: %d" % (proto_ver, cmd, datalen, ip_from, fromport)
 	if magic == MRIM_ID:
 	    if (cmd == 0x1008 or cmd == 0x1009):
 		data = data[44:]
@@ -152,6 +169,7 @@ class Sniffer(object):
 		data = data[4:] # flags
 		handlelen = struct.unpack("<I", data[:4])[0] # len handle
 		handle = str(data[4:4+handlelen]) # get handle
+		if self.debug: print "Handle: %s, len: %d" % (handle, datalen)
 		data = data[4+handlelen:]
 		datalen = struct.unpack("<I", data[:4])[0] # len message
 		msg = data[4:4+datalen]
@@ -181,9 +199,11 @@ class Sniffer(object):
 	    db = MySQLdb.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name, use_unicode=True, charset="utf8")
 	    dbh = db.cursor()
 	    if route == INCOMING:
+		if self.debug: print "Message from %s: %s" % (handle, msg)
 		ip_dst = socket.inet_ntoa(pkt.dst)
 		dbh.execute("""INSERT INTO sniff (proto, ip, from_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_dst, handle, msg))
 	    elif route == OUTGOING:
+		if self.debug: print "Message to %s: %s" % (handle, msg)
 		ip_src = socket.inet_ntoa(pkt.src)
 		dbh.execute("""INSERT INTO sniff (proto, ip, to_handle, msg) VALUES ("%d", "%s", "%s", "%s")""" % (temp, ip_src, handle, msg))
 	    dbh.close()
@@ -224,8 +244,8 @@ class Sniffer(object):
 	sys.stdout.flush()
 	sys.stderr.flush()
 	si = file(self.stdin, 'r')
-	so = file(self.stdout, 'a+')
-	se = file(self.stderr, 'a+', 0)
+	so = se = self.imlog
+	sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 	os.dup2(si.fileno(), sys.stdin.fileno())
 	os.dup2(so.fileno(), sys.stdout.fileno())
 	os.dup2(se.fileno(), sys.stderr.fileno())
@@ -252,8 +272,9 @@ def main():
     opt.add_option("-d", "--daemonize", dest="daemon", help="Daemonize", action="store_true", default=False)
     opt.add_option("-p", "--pidfile", dest="pidfile", help="File to save pid to", default=PIDFILE)
     opt.add_option("-f", "--logfile", dest="logfile", help="File to save logs to", default=LOGFILE)
+    opt.add_option("-b", "--debug", dest="debug", help="debug mode", action="store_true", default=False)
     options, args = opt.parse_args()
-    sniff = Sniffer(options.daemon, options.pidfile, options.logfile)
+    sniff = Sniffer(options.daemon, options.pidfile, options.logfile, options.debug)
     sniff.run()
 
 if __name__ == '__main__':
